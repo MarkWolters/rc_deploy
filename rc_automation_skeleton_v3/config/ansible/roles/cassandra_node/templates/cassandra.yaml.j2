@@ -1,0 +1,28 @@
+# Minimal cassandra.yaml overrides for RC environment.
+# This template assumes GossipingPropertyFileSnitch and a 3-node cluster.
+
+cluster_name: "{{ cassandra_cluster_name }}"
+
+# Directories on NVMe
+hints_directory: "{{ cassandra_dirs.hints }}"
+data_file_directories:
+  - "{{ cassandra_dirs.data }}"
+metadata_directory: "{{ cassandra_dirs.metadata }}"
+commitlog_directory: "{{ cassandra_dirs.commitlog }}"
+cdc_raw_directory: "{{ cassandra_dirs.cdc_raw }}"
+saved_caches_directory: "{{ cassandra_dirs.saved_caches }}"
+
+# Seeds: use the first Cassandra node's private IP by default
+seed_provider:
+  - class_name: org.apache.cassandra.locator.SimpleSeedProvider
+    parameters:
+      - seeds: "{{ cassandra_seeds | join(',') }}"
+
+# Bind/listen behavior:
+# Request: listen_address left blank. We implement by omitting it.
+# NOTE: Cassandra requires a listen_address or listen_interface in some versions; if your RC requires it,
+# set cassandra_listen_address explicitly.
+rpc_address: 0.0.0.0
+broadcast_rpc_address: "{{ cassandra_broadcast_rpc_address }}"
+
+endpoint_snitch: GossipingPropertyFileSnitch

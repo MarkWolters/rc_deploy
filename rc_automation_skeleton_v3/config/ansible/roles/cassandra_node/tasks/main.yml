@@ -1,0 +1,218 @@
+- name: Install build dependencies (Cassandra)
+  apt:
+    name:
+      - openjdk-17-jdk
+      - ant
+      - maven
+      - build-essential
+      - xfsprogs
+      - netcat-openbsd
+    state: present
+
+# -------- NVMe detection / mount --------
+- name: Determine root block device (parent)
+  shell: |
+    set -euo pipefail
+    ROOT_SRC=$(df --output=source / | tail -1)
+    # If ROOT_SRC is a partition (e.g. /dev/nvme0n1p1), find its parent disk (nvme0n1)
+    lsblk -no PKNAME "$ROOT_SRC" 2>/dev/null || true
+  args:
+    executable: /bin/bash
+  register: root_parent
+  changed_when: false
+
+- name: List NVMe disks
+  shell: |
+    set -euo pipefail
+    lsblk -nd -o NAME,TYPE | awk '$2=="disk"{print $1}' | grep -E '^nvme' || true
+  args:
+    executable: /bin/bash
+  register: nvme_disks
+  changed_when: false
+
+- name: Choose instance-store NVMe disk (exclude root)
+  set_fact:
+    instance_nvme_disk: >-
+      {{
+        (nvme_disks.stdout_lines | reject('equalto', root_parent.stdout | trim) | list | first) | default('')
+      }}
+
+- name: Fail if no instance NVMe disk found
+  fail:
+    msg: "No instance-store NVMe disk found (expected on i4i). nvme_disks={{ nvme_disks.stdout_lines }}, root_parent={{ root_parent.stdout | trim }}"
+  when: instance_nvme_disk == ''
+
+- name: Create mount point
+  file:
+    path: "{{ nvme_mount_point }}"
+    state: directory
+    mode: "0755"
+
+- name: Check filesystem on instance NVMe
+  shell: |
+    set -euo pipefail
+    blkid /dev/{{ instance_nvme_disk }} >/dev/null 2>&1 && echo "has_fs" || echo "no_fs"
+  args:
+    executable: /bin/bash
+  register: fs_check
+  changed_when: false
+
+- name: Format instance NVMe with XFS (one-time)
+  filesystem:
+    fstype: xfs
+    dev: "/dev/{{ instance_nvme_disk }}"
+  when: fs_check.stdout.strip() == "no_fs"
+
+- name: Get UUID for instance NVMe
+  command: blkid -s UUID -o value /dev/{{ instance_nvme_disk }}
+  register: nvme_uuid
+  changed_when: false
+
+- name: Mount instance NVMe
+  mount:
+    path: "{{ nvme_mount_point }}"
+    src: "UUID={{ nvme_uuid.stdout }}"
+    fstype: xfs
+    opts: "defaults,noatime"
+    state: mounted
+
+- name: Create Cassandra NVMe directories
+  file:
+    path: "{{ item }}"
+    state: directory
+    mode: "0755"
+    owner: ubuntu
+    group: ubuntu
+  loop:
+    - "{{ cassandra_dirs.hints }}"
+    - "{{ cassandra_dirs.data }}"
+    - "{{ cassandra_dirs.metadata }}"
+    - "{{ cassandra_dirs.commitlog }}"
+    - "{{ cassandra_dirs.cdc_raw }}"
+    - "{{ cassandra_dirs.saved_caches }}"
+
+# -------- Cassandra build/install --------
+- name: Create install directory
+  file:
+    path: "{{ cassandra_install_dir }}"
+    state: directory
+    mode: "0755"
+    owner: ubuntu
+    group: ubuntu
+
+- name: Clone Cassandra repository
+  git:
+    repo: "{{ cassandra_repo }}"
+    dest: "{{ cassandra_install_dir }}"
+    version: "{{ cassandra_branch }}"
+    force: yes
+  become: false
+
+- name: Build Cassandra from source
+  shell: |
+    set -euo pipefail
+    cd "{{ cassandra_install_dir }}"
+    ant clean jar
+  args:
+    executable: /bin/bash
+  become: false
+
+# -------- Cassandra configuration --------
+- name: Compute seeds list (default: first node private IP)
+  set_fact:
+    cassandra_seeds: ["{{ hostvars[groups['cassandra'][0]].private_ip }}"]
+
+- name: Compute broadcast_rpc_address (public IP as requested)
+  set_fact:
+    cassandra_broadcast_rpc_address: "{{ ansible_host }}"
+
+- name: Deploy cassandra.yaml overrides
+  template:
+    src: cassandra.yaml.j2
+    dest: "{{ cassandra_install_dir }}/conf/cassandra.yaml"
+    owner: ubuntu
+    group: ubuntu
+    mode: "0644"
+
+- name: Set heap size in cassandra-env.sh (MAX_HEAP_SIZE)
+  lineinfile:
+    path: "{{ cassandra_install_dir }}/conf/cassandra-env.sh"
+    regexp: '^MAX_HEAP_SIZE='
+    line: 'MAX_HEAP_SIZE="{{ cassandra_max_heap }}"'
+    create: no
+
+- name: Set heap new size in cassandra-env.sh (HEAP_NEWSIZE)
+  lineinfile:
+    path: "{{ cassandra_install_dir }}/conf/cassandra-env.sh"
+    regexp: '^HEAP_NEWSIZE='
+    line: 'HEAP_NEWSIZE="{{ cassandra_heap_newsize }}"'
+    create: no
+
+- name: Enable remote JMX (LOCAL_JMX=no)
+  lineinfile:
+    path: "{{ cassandra_install_dir }}/conf/cassandra-env.sh"
+    regexp: '^LOCAL_JMX='
+    line: 'LOCAL_JMX=no'
+    create: yes
+  when: cassandra_local_jmx == false
+
+- name: Configure remote JMX port and hostname (force single-port JMX inside VPC)
+  block:
+    - name: Ensure JMX port is set (jmxremote.port)
+      lineinfile:
+        path: "{{ cassandra_install_dir }}/conf/cassandra-env.sh"
+        insertafter: '^#?JVM_OPTS=.*jmxremote'
+        line: 'JVM_OPTS="$JVM_OPTS -Dcom.sun.management.jmxremote.port={{ cassandra_jmx_port }}"'
+        state: present
+
+    - name: Ensure JMX RMI port is set (jmxremote.rmi.port)
+      lineinfile:
+        path: "{{ cassandra_install_dir }}/conf/cassandra-env.sh"
+        insertafter: '^#?JVM_OPTS=.*jmxremote'
+        line: 'JVM_OPTS="$JVM_OPTS -Dcom.sun.management.jmxremote.rmi.port={{ cassandra_jmx_port }}"'
+        state: present
+
+    - name: Ensure JMX hostname is private IP (inside VPC)
+      lineinfile:
+        path: "{{ cassandra_install_dir }}/conf/cassandra-env.sh"
+        insertafter: '^#?JVM_OPTS=.*jmxremote'
+        line: 'JVM_OPTS="$JVM_OPTS -Djava.rmi.server.hostname={{ private_ip }}"'
+        state: present
+  when: cassandra_local_jmx == false
+
+
+# -------- Systemd service --------
+- name: Install systemd unit
+  template:
+    src: cassandra.service.j2
+    dest: /etc/systemd/system/cassandra.service
+    mode: "0644"
+
+- name: Reload systemd
+  systemd:
+    daemon_reload: true
+
+- name: Enable and start Cassandra
+  systemd:
+    name: cassandra
+    state: started
+    enabled: true
+
+- name: Wait for CQL port 9042
+  wait_for:
+    host: "{{ private_ip }}"
+    port: 9042
+    delay: 10
+    timeout: 600
+
+- name: Wait for node to report UN in nodetool status
+  shell: |
+    set -euo pipefail
+    "{{ cassandra_install_dir }}/bin/nodetool" status | grep -E '^[UN]\s+{{ private_ip }}\b' >/dev/null
+  args:
+    executable: /bin/bash
+  register: nodetool_ok
+  retries: 30
+  delay: 10
+  until: nodetool_ok.rc == 0
+  changed_when: false

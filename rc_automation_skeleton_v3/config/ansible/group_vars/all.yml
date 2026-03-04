@@ -1,0 +1,41 @@
+# Common parameters for RC test runs
+aws_region: us-east-1
+
+# Cassandra build settings
+cassandra_repo: "https://github.com/datastax/cassandra.git"
+cassandra_branch: "main"   # set to your RC branch/tag at run time
+
+# Where to install Cassandra on nodes
+cassandra_install_dir: "/opt/cassandra"
+cassandra_data_dir: "/mnt/cassandra-data"
+
+# Test client tooling
+nosqlbench_version: "LATEST"   # prefer pinning a release
+jvector_bench_repo: "https://github.com/datastax/jvector.git"
+jvector_bench_ref: "main"      # or tag/SHA
+dataset_s3_bucket: "jvector_infratest"
+
+# NOTE: You can switch between building from source vs fetching prebuilt binaries.
+build_tools_from_source: true
+
+# Cassandra configuration specifics for RC cluster
+cassandra_cluster_name: "jvector-test"
+
+# NVMe mount point and directories
+nvme_mount_point: "/mnt/nvme"
+cassandra_nvme_base: "/mnt/nvme/cassandra"
+cassandra_dirs:
+  hints: "/mnt/nvme/cassandra/hints"
+  data: "/mnt/nvme/cassandra/data"
+  metadata: "/mnt/nvme/cassandra/metadata"
+  commitlog: "/mnt/nvme/cassandra/commitlog"
+  cdc_raw: "/mnt/nvme/cassandra/cdc_raw"
+  saved_caches: "/mnt/nvme/cassandra/saved_caches"
+
+# Heap settings (override per run if desired)
+cassandra_max_heap: "16G"
+cassandra_heap_newsize: "800M"
+
+# Remote JMX
+cassandra_local_jmx: false
+cassandra_jmx_port: 7199

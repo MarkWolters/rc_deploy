@@ -1,0 +1,13 @@
+- name: Configure Cassandra nodes
+  hosts: cassandra
+  become: true
+  roles:
+    - common
+    - cassandra_node
+
+- name: Configure test client node
+  hosts: test_client
+  become: true
+  roles:
+    - common
+    - test_client
