@@ -1,0 +1,27 @@
+aws_region: us-east-1
+
+cassandra_repo: "https://github.com/datastax/cassandra.git"
+cassandra_branch: "main"
+cassandra_install_dir: "/opt/cassandra"
+cassandra_cluster_name: "jvector-test"
+cassandra_seeds: []
+cassandra_endpoint_snitch: "GossipingPropertyFileSnitch"
+cassandra_max_heap: "16G"
+cassandra_heap_newsize: "800M"
+
+nvme_mount_point: "/mnt/nvme"
+cassandra_dirs:
+  hints: "/mnt/nvme/cassandra/hints"
+  data: "/mnt/nvme/cassandra/data"
+  metadata: "/mnt/nvme/cassandra/metadata"
+  commitlog: "/mnt/nvme/cassandra/commitlog"
+  cdc_raw: "/mnt/nvme/cassandra/cdc_raw"
+  saved_caches: "/mnt/nvme/cassandra/saved_caches"
+
+nosqlbench_repo: "https://github.com/nosqlbench/nosqlbench.git"
+nosqlbench_ref: "main"
+rc_tests_repo: "https://github.com/MarkWolters/rc_deploy.git"
+rc_tests_ref: "main"
+rc_tools_dir: "/opt/rc-tools"
+rc_tests_dir: "/opt/rc-tests"
+manual_test_hint: "s1"

@@ -1,0 +1,64 @@
+- name: Prepare Cassandra nodes
+  hosts: cassandra
+  gather_facts: false
+  tasks:
+    - name: Wait for SSH to become available
+      wait_for_connection:
+        delay: 10
+        timeout: 300
+        sleep: 5
+
+- name: Configure all Cassandra nodes without starting
+  hosts: cassandra
+  become: true
+  vars:
+    cassandra_start_enabled: false
+  roles:
+    - common
+    - cassandra_node
+
+- name: Start seed node first
+  hosts: cassandra[0]
+  become: true
+  vars:
+    cassandra_start_enabled: true
+  roles:
+    - cassandra_node
+
+- name: Start non-seed Cassandra nodes one at a time
+  hosts: cassandra[1:]
+  serial: 1
+  become: true
+  vars:
+    cassandra_start_enabled: true
+  roles:
+    - cassandra_node
+
+- name: Verify Cassandra cluster health
+  hosts: cassandra[0]
+  become: true
+  tasks:
+    - name: Wait until all 3 nodes are UN
+      shell: /opt/cassandra/bin/nodetool status | grep '^UN' | wc -l
+      register: node_count
+      retries: 60
+      delay: 10
+      until: node_count.stdout | int == 3
+      changed_when: false
+
+- name: Prepare test client node
+  hosts: test_client
+  gather_facts: false
+  tasks:
+    - name: Wait for SSH to become available
+      wait_for_connection:
+        delay: 10
+        timeout: 300
+        sleep: 5
+
+- name: Configure test client
+  hosts: test_client
+  become: true
+  roles:
+    - common
+    - test_client

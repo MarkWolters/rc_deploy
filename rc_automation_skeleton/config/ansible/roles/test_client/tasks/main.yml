@@ -1,0 +1,159 @@
+- name: Install base packages
+  apt:
+    name:
+      - git
+      - maven
+      - curl
+      - unzip
+      - desktop-file-utils
+    state: present
+    update_cache: yes
+
+- name: Download Temurin Java 25
+  get_url:
+    url: https://api.adoptium.net/v3/binary/latest/25/ga/linux/x64/jdk/hotspot/normal/eclipse
+    dest: /tmp/jdk25.tar.gz
+    mode: "0644"
+
+- name: Create Java directory
+  file:
+    path: /opt/java
+    state: directory
+    mode: "0755"
+
+- name: Extract Java 25
+  unarchive:
+    src: /tmp/jdk25.tar.gz
+    dest: /opt/java
+    remote_src: yes
+
+- name: Detect extracted JDK directory
+  shell: ls -d /opt/java/jdk-25*
+  register: jdk_dir
+  changed_when: false
+
+- name: Configure JAVA_HOME for shell sessions
+  copy:
+    dest: /etc/profile.d/java.sh
+    mode: "0755"
+    content: |
+      export JAVA_HOME={{ jdk_dir.stdout }}
+      export PATH=$JAVA_HOME/bin:$PATH
+
+- name: Create rc tools directory
+  file:
+    path: "{{ rc_tools_dir }}"
+    state: directory
+    owner: ubuntu
+    group: ubuntu
+    mode: "0755"
+
+- name: Create rc tests directory
+  file:
+    path: "{{ rc_tests_dir }}"
+    state: directory
+    owner: ubuntu
+    group: ubuntu
+    mode: "0755"
+
+- name: Clone NoSQLBench repository
+  git:
+    repo: "{{ nosqlbench_repo }}"
+    dest: "{{ rc_tools_dir }}/nosqlbench"
+    version: "{{ nosqlbench_ref }}"
+    force: yes
+  become: false
+
+- name: Build NoSQLBench
+  shell: |
+    set -euo pipefail
+    export JAVA_HOME={{ jdk_dir.stdout }}
+    export PATH=$JAVA_HOME/bin:$PATH
+    cd "{{ rc_tools_dir }}/nosqlbench"
+    mvn -q -DskipTests clean package
+  args:
+    executable: /bin/bash
+  become: false
+
+- name: Clone RC test definitions
+  git:
+    repo: "{{ rc_tests_repo }}"
+    dest: "{{ rc_tests_dir }}"
+    version: "{{ rc_tests_ref }}"
+    force: yes
+  become: false
+
+- name: Discover available test suite directories
+  find:
+    paths: "{{ rc_tests_dir }}/tests"
+    file_type: directory
+    patterns: "s*"
+    recurse: false
+  register: discovered_test_dirs
+
+- name: Write helper script to list available suites
+  copy:
+    dest: "{{ rc_tools_dir }}/list_rc_suites.sh"
+    owner: ubuntu
+    group: ubuntu
+    mode: "0755"
+    content: |
+      #!/usr/bin/env bash
+      set -euo pipefail
+      echo "Available RC test suites:"
+      find "{{ rc_tests_dir }}/tests" -maxdepth 1 -mindepth 1 -type d | sort
+
+- name: Write helper script to validate a suite exists
+  copy:
+    dest: "{{ rc_tools_dir }}/check_rc_suite.sh"
+    owner: ubuntu
+    group: ubuntu
+    mode: "0755"
+    content: |
+      #!/usr/bin/env bash
+      set -euo pipefail
+      if [[ $# -ne 1 ]]; then
+        echo "Usage: $0 <suite-name>" >&2
+        exit 1
+      fi
+      SUITE="{{ rc_tests_dir }}/tests/$1"
+      if [[ ! -d "$SUITE" ]]; then
+        echo "Suite not found: $SUITE" >&2
+        exit 2
+      fi
+      echo "Suite exists: $SUITE"
+
+- name: Write ready message file
+  copy:
+    dest: "{{ rc_tools_dir }}/READY.txt"
+    owner: ubuntu
+    group: ubuntu
+    mode: "0644"
+    content: |
+      Test client prepared.
+
+      Java:
+        {{ jdk_dir.stdout }}
+
+      NoSQLBench source/build:
+        {{ rc_tools_dir }}/nosqlbench
+
+      RC test definitions:
+        {{ rc_tests_dir }}/tests
+
+      Example next steps:
+        source /etc/profile.d/java.sh
+        java -version
+        cd {{ rc_tools_dir }}/nosqlbench
+        ./nb --version
+        {{ rc_tools_dir }}/check_rc_suite.sh {{ manual_test_hint }}
+        ls {{ rc_tests_dir }}/tests/{{ manual_test_hint }}
+
+- name: Print test client summary
+  debug:
+    msg: |
+      Test client prepared.
+      Java: {{ jdk_dir.stdout }}
+      NoSQLBench: {{ rc_tools_dir }}/nosqlbench
+      Tests root: {{ rc_tests_dir }}/tests
+      Discovered suites: {{ discovered_test_dirs.files | map(attribute='path') | list }}
