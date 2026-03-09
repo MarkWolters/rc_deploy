@@ -1,0 +1,40 @@
+{
+  "datastax-java-driver": {
+    "advanced": {
+      "auth-provider": {
+        "class": "PlainTextAuthProvider",
+        "username": "",
+        "password": ""
+      },
+      "connection": {
+        "connect-timeout": "10 minutes",
+        "init-query-timeout":"10 minutes"
+      },
+      "protocol": {
+        "version": "V4"
+      },
+      "continuous-paging": {
+        "timeout": {
+          "first-page": "5 minutes",
+          "other-pages": "5 minutes"
+        }
+      }
+    },
+    "basic": {
+      "load-balancing-policy": {
+        "class": "DefaultLoadBalancingPolicy",
+        "local-datacenter": "dc1"
+      },
+      "request": {
+        "timeout": "10 minutes"
+      }
+    }
+  },
+  "driver": {
+    "basic": {
+      "request": {
+        "timeout": "10 minutes"
+      }
+    }
+  }
+}
