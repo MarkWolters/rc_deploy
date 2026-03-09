@@ -181,7 +181,7 @@
     {{ cassandra_install_dir }}/conf/cassandra.yaml
     {{ cassandra_cluster_name }}
     {{ private_ip }}
-    {{ ansible_host }}
+    {{ private_ip }}
     {{ effective_cassandra_seeds | join(',') }}
     {{ cassandra_dirs.hints }}
     {{ cassandra_dirs.data }}

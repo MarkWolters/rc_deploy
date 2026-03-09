@@ -64,6 +64,18 @@
     force: yes
   become: false
 
+- name: Add virtdata-lib-io dependency to nb-virtdata-all pom
+  blockinfile:
+    path: "{{ rc_tools_dir }}/nosqlbench/nb-virtdata/nb-virtdata-all/pom.xml"
+    marker: "<!-- {mark} RC DEMO DEPENDENCY -->"
+    insertafter: "<dependencies>"
+    block: |
+      <dependency>
+          <groupId>io.nosqlbench</groupId>
+          <artifactId>virtdata-lib-io</artifactId>
+          <version>${revision}</version>
+      </dependency>
+
 - name: Build NoSQLBench
   shell: |
     set -euo pipefail
